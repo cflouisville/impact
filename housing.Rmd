@@ -1,0 +1,218 @@
+---
+title: "housing"
+output: html_document
+date: "2025-02-04"
+---
+
+```{r setup, include=FALSE}
+library(glptools)
+
+glp_load_packages()
+```
+
+# Cost-burden
+
+```{r}
+
+housing_data <- glpdata::housing_county
+
+homeownership_summary <- housing_data %>%
+  filter(var_type == "percent") %>%
+  trend_data(homeownership) %>%
+  pivot_
+
+cost_burden_summary <- housing_data %>%
+  filter(var_type == "percent") %>%
+  trend_data(homeownership)
+
+t=housing_data %>% filter(sex == "total", FIPS == "21111")
+
+homeownership_race <- housing_data %>%
+  filter(var_type == "percent") %>%
+  trend_data(homeownership, cat = "race")
+
+cost_burden_race <- housing_data %>%
+  filter(var_type == "percent") %>%
+  trend_data(homeownership, cat = "race")
+
+write_excel_csv(homeownership_summary, "output_data/homeownership_summary.csv")
+
+
+```
+
+```{r}
+
+zillow_rental_index <- read_csv("data/County_zori_uc_sfrcondomfr_sm_sa_month.csv")
+
+zillow_rental_index %<>%
+  mutate(FIPS = StateCodeFIPS %p% MunicipalCodeFIPS) %>%
+  pull_peers() %>%
+  pivot_longer(`2015-01-31`:`2024-12-31`, names_to = "month", values_to = "index") %>%
+  transmute(
+    FIPS,
+    month = as.Date(month),
+    index) %>%
+  stl_merge(just_replace_FIPS = TRUE) %>%
+  group_by(FIPS, month) %>%
+  reframe(index = mean(index))
+
+zillow_rental_index %<>%
+  group_by(FIPS) %>%
+  mutate(
+    rent_increase = index - lag(index)) %>%
+  ungroup()
+
+peer_summary <- function(df, variable, cols) {
+  
+  df %<>%
+    rename(var = variable)
+  
+  df_wol <- df %>%
+    filter(FIPS != "21111") %>%
+    group_by(pick({{ cols }})) %>%
+    reframe(
+      q1 = quantile(var, prob = 0.25, na.rm = TRUE),
+      mean = mean(var, na.rm = TRUE),
+      q3 = quantile(var, prob = 0.75, na.rm = TRUE))
+  
+  df_lou <- df %>%
+    filter(FIPS == "21111") %>%
+    rename(lou = var) %>%
+    select({{cols}}, lou)
+  
+  
+  output <- df_lou %>% left_join(df_wol, by = "month")
+  
+}
+
+zillow1 <- peer_summary(zillow_rental_index, "index", month)
+
+zillow2 <- peer_summary(zillow_rental_index, "rent_increase", month)
+
+t=zillow_rental_index %>%
+  group_by(month) %>%
+  arrange(desc(rent_increase)) %>%
+  mutate(rank = row_number()) %>%
+  ungroup() %>%
+  filter(FIPS == "21111")
+
+zillow_rental_index_annual <- zillow_rental_index %>%
+  filter(lubridate::month(month) == 12) %>%
+  group_by(FIPS) %>%
+  mutate(
+    rent_increase = index - lag(index)) %>%
+  ungroup()
+
+zillow3 <- peer_summary(zillow_rental_index_annual, "rent_increase", month)
+
+
+
+write_csv(zillow1, "output_data/Rent.csv")
+write_csv(zillow2, "output_data/Rent increase.csv")
+
+
+```
+
+# Affordbla Housing
+
+```{r cars}
+
+nhpd <- readxl::read_excel("data/National Housing Preservation Database.xlsx")
+
+nhpd_properties <- readxl::read_excel("data/All Properties.xlsx")
+nhpd_subsidies  <- readxl::read_excel("data/All Subsidies.xlsx", 
+                                      col_types = c("text", "text", "numeric", rep("text", 4), "date", "date", "numeric", rep("text", 5), "numeric", "numeric",
+                                                    rep("text", 4), rep("numeric", 3), "text", "date", "date", "numeric", "numeric", rep("text", 3), "numeric", rep("text", 3))
+)
+
+nhpd %<>% filter(CountyCode == "21111")
+
+nhpd %<>%
+  transmute(
+    
+    # ID
+    ID = NHPDPropertyID,
+    name = PropertyName,
+    
+    # Location
+    address = PropertyAddress,
+    FIPS = CountyCode,
+    zip = Zip,
+    tract = CensusTract,
+    lat = Latitude,
+    lon = Longitude,
+    
+    # subsidies
+    subsidy_status = PropertyStatus,
+    active_subsidies = ActiveSubsidies,
+    inactive_subsidies = TotalInactiveSubsidies,
+    inconclusive_subsidies = TotalInconclusiveSubsidies,
+    
+    #
+    units = TotalUnits,
+    start_date = EarliestStartDate,
+    end_date = EarliestEndDate,
+    
+    owner = Owner,
+    owner_type = OwnerType,
+    
+    reac_score = ReacScore1)
+
+nhpd_subsidies %<>%
+  transmute(
+    ID = `NHPD Property ID`,
+    subsidy_ID = `NHPD Subsidy ID`,
+    
+    status = `Subsidy Status`,
+    subsidy_name = `Subsidy Name`,
+    subname = `Subsidy Subname`,
+    
+    start = `Start Date`,
+    end = `End Date`,
+    
+    units = `Assisted Units`
+  )
+
+nhpd_subsidies %<>%
+  filter(ID %in% nhpd$ID)
+    
+    # section8
+    secion8 = NumberActiveSection8,
+    
+    s8_start_1 = S8_1_StartDate,
+    s8_end_1   = S8_1_EndDate,
+    s8_units_1 = S8_1_AssistedUnits,
+    
+    s8_start_2 = S8_2_StartDate,
+    s8_end_2   = S8_2_EndDate,
+    s8_units_2 = S8_2_AssistedUnits,
+    
+    s_start_1 = S202_1_StartDate,
+    s8_end_1   = S202_1_StartDate,
+    s8_units_1 = S8_1_AssistedUnits,
+    
+    s8_start_2 = S8_2_StartDate,
+    s8_end_2   = S8_2_EndDate,
+    s8_units_2 = S8_2_AssistedUnits,
+    
+  )
+
+
+nhpd_subsidies %>% filter(status == "Active") %>% pull(units) %>% sum(na.rm=T)
+
+nhpd %<>% filter(FIPS == "21111")
+
+table(is.na(nhpd$CountyCode))
+
+list.files()
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
